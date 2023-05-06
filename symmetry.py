@@ -214,7 +214,7 @@ def cost_function(params, data, labels):
     for i in range(len(data)):
         output = predict(data[i],params)
         pos = np.argmax(np.abs(output))
-        output = np.zeros(3)
+        output = -np.ones(3)
         output[pos] = 1
         cost += l2_loss(output, y[i])
     return cost/len(data)
