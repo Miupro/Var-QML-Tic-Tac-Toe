@@ -5,9 +5,15 @@ from qiskit.primitives import Estimator
 from qiskit.algorithms.optimizers import SPSA
 import matplotlib.pyplot as plt
 
+########## PARAMS ##########
+params = np.random.rand(9)*2*np.pi
+spsaMaxIter = 100
+maxBatchRun = 20
+batchSize = 15
 ########## TIC TAC TOE FUNCTIONS ##########
 
 # helper function to determine valid tic tac toe board positions
+
 def get_winner(board):
         # Check the board for any winning combinations
     winning_combinations = [
@@ -65,8 +71,8 @@ def is_valid_tic_tac_toe(board):
                 x_wins = True
             else:
                 o_wins = True
-    # Check if both 'x' and 'o' won or if neither won
-    if x_wins and o_wins or (not x_wins and not o_wins):
+    # Check if both 'x' and 'o' won {or if neither won}
+    if x_wins and o_wins: #or (not x_wins and not o_wins):
         return False
     # Check that the board is a valid final board configuration
     if (x_wins and count_x != count_o + 1) or (o_wins and count_x != count_o):
@@ -92,6 +98,25 @@ def generate_tic_tac_toe_configs():
         if is_valid_tic_tac_toe(board):
             valid_configs.append(board)
             winners.append(get_winner(board))
+    return valid_configs, winners
+
+def generate_all_tic_tac_toe_instances():
+    # generate all possible cell values for Tic Tac Toe
+    valid_configs = []
+    winners = []
+    for a in ['x','o','']:
+        for b in ['x','o','']:
+            for c in ['x','o','']:
+                for d in ['x','o','']:
+                    for e in ['x','o','']:
+                        for f in ['x','o','']:
+                            for g in ['x','o','']:
+                                for h in ['x','o','']:
+                                    for i in ['x','o','']:
+                                        board = [a,b,c,d,e,f,g,h,i]
+                                        if is_valid_tic_tac_toe(board):
+                                            valid_configs.append(board)
+                                            winners.append(get_winner(board))
     return valid_configs, winners
 
 ########## ENCODING TTT INTO CIRCUITS ##########
@@ -146,14 +171,15 @@ def l2_loss(output, target):
     output, target = np.array(output), np.array(target)
     return np.sum(np.abs(output - target)**2)
 
-########## GENRATE DATA ##########
+########## GENERATE DATA ##########
 
-boards, winners = generate_tic_tac_toe_configs()
+boards, winners = generate_all_tic_tac_toe_instances()
+# boards, winners = generate_tic_tac_toe_configs()
 x = boards
 y = winners
 # shuffle the indices
 shuffle_indices = np.random.permutation(len(x))
-train_size = int(len(x) * 0.3)
+train_size = int(len(x) * 0.7)
 # split the indices into training and testing sets
 train_indices = np.array(shuffle_indices[:train_size])
 test_indices = np.array(shuffle_indices[train_size:])
@@ -164,23 +190,7 @@ x_test, y_test = np.take(x, test_indices, axis=0), np.take(y, test_indices, axis
 
 ########## TRAIN THE CIRCUIT ##########
 
-# Define the optimizer
-class OptimizerLog:
-    """Log to store optimizer's intermediate results"""
-    def __init__(self):
-        self.evaluations = []
-        self.parameters = []
-        self.costs = []
-    def update(self, evaluation, parameter, cost, _stepsize, _accept):
-        """Save intermediate results. Optimizer passes five values
-        but we ignore the last two."""
-        self.evaluations.append(evaluation)
-        self.parameters.append(parameter)
-        self.costs.append(cost)
-
-log = OptimizerLog()
-optimizer = SPSA(maxiter=50,callback=log.update)
-
+# predictions using the circuit model
 def predict(data, params):
     circ = QuantumCircuit(9)
     circ.params = params
@@ -208,34 +218,69 @@ def predict(data, params):
     exp_val_x = results[1]
     return [exp_val_o, exp_val_draw, exp_val_x]
 
+# cost function
 def cost_function(params, data, labels):
     y = labels
     cost = 0
     for i in range(len(data)):
         output = predict(data[i],params)
-        pos = np.argmax(np.abs(output))
-        output = -np.ones(3)
-        output[pos] = 1
+        # pos = np.argmax(np.abs(output))
+        # output = -np.ones(3)
+        # output[pos] = 1
         cost += l2_loss(output, y[i])
     return cost/len(data)
 
-def objective_function(variational):
-    """Cost function of circuit parameters on training data.
-    The optimizer will attempt to minimize this."""
-    return cost_function(variational,x_train, y_train)
+# Define the optimizer
+optimizer = SPSA(maxiter=spsaMaxIter)
 
-# Initialize the parameters
-params = np.random.rand(9)*2*np.pi
-# Train the circuit
-print('Initial parameters:', params)
-# print(cost_function(params,x_train,y_train))
-result = optimizer.minimize(fun=objective_function,x0= params)
-opt_var = result.x
+# Train the circuit in batches
+xx = params
+for jj in range(maxBatchRun):
+    shuffle_indices = np.random.permutation(train_size)
+    train_indices = np.array(shuffle_indices[:batchSize])
+    # create the training batch
+    x_train_batch, y_train_batch = np.take(x_train, train_indices, axis=0), np.take(y_train, train_indices, axis=0)
+    objective_function = lambda variational: cost_function(variational,x_train_batch, y_train_batch)
+    result = optimizer.minimize(fun=objective_function,x0= xx)
+    xx = result.x
+    print(jj)
+
 opt_value = result.fun
+np.savetxt('opt_var.txt',xx)
 
-fig = plt.figure()
-plt.plot(log.evaluations, log.costs)
-plt.xlabel('Steps')
-plt.ylabel('Cost')
-plt.show()
+y_pred = -np.ones(y_test.shape())
+for i in range(len(x_test)):
+    predX = predict(x_test[i],xx)
+    pos = np.argmax(predX)
+    predX = list(-1*np.ones(3))
+    y_pred[i] = predX
 
+print(np.sum(y_test-y_pred)/len(x)/ 0.3)
+
+# fig = plt.figure()
+# plt.plot(log.evaluations, log.costs)
+# plt.xlabel('Steps')
+# plt.ylabel('Cost')
+# plt.show()
+
+# 178
+# for i in range(len(winners)):
+#     if winners[i] == [-1,1,-1]:
+#         print(i)
+
+# 234
+# class OptimizerLog:
+#     """Log to store optimizer's intermediate results"""
+#     def __init__(self):
+#         self.evaluations = []
+#         self.parameters = []
+#         self.costs = []
+#     def update(self, evaluation, parameter, cost, _stepsize, _accept):
+#         """Save intermediate results. Optimizer passes five values
+#         but we ignore the last two."""
+#         self.evaluations.append(evaluation)
+#         self.parameters.append(parameter)
+#         self.costs.append(cost)
+
+# log = OptimizerLog()
+# optimizer = SPSA(maxiter=spsaMaxIter,callback=log.update)
